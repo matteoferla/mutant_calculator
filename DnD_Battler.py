@@ -518,41 +518,34 @@ if False:
 if False:
     rounds=1000
     arena = Encounter(joe, antijoe)
-    d={}
-    e={}
-    f={}
-    g={}
+    d=[{},{},{},{}]
     for x in range(2,13,1):
         joe.attacks[0]['damage'].dice[0]=x
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
         r=round(arena.go_to_war(rounds)['good']/rounds*100)
-        d[str(x/2+2.5)]=r
+        d[0][str(x/2+2.5)]=r
     for x in range(2,13,1):
         joe.attacks[0]['damage'].dice=[x,x]
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
         r=round(arena.go_to_war(rounds)['good']/rounds*100)
-        e[str(x+3)+".0"]=r
+        d[1][str(x+3)+".0"]=r
     for x in range(2,13,1):
         joe.attacks[0]['damage'].bonus=3
         joe.attacks[0]['damage'].dice=[x]
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
         r=round(arena.go_to_war(rounds)['good']/rounds*100)
-        f[str(x/2+3.5)]=r
+        d[2][str(x/2+3.5)]=r
     for x in range(2,13,1):
         joe.attacks[0]['damage'].bonus=4
         joe.attacks[0]['damage'].dice=[x]
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
         r=round(arena.go_to_war(rounds)['good']/rounds*100)
-        g[str(x/2+4.5)]=r
-    for x in sorted(list(set(list(d.keys())+list(e.keys())+list(f.keys())+list(g.keys())))):
+        d[3][str(x/2+4.5)]=r
+    for x in sorted(list(set(list(d[0].keys())+list(d[1].keys())+list(d[2].keys())+list(d[3].keys())))):
         s=str(x)+"\t"
-        if x in d.keys(): s+= str(d[x])
-        s+= "\t"
-        if x in e.keys(): s+= str(e[x])
-        s+= "\t"
-        if x in f.keys(): s+= str(f[x])
-        s+= "\t"
-        if x in g.keys(): s+= str(g[x])
+        for y in range(0,4):
+            if x in d[y].keys(): s+= str(d[y][x])
+            s+= "\t"
         print(s)
 
 ### KILL PEACEFULLY
