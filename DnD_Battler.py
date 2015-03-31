@@ -5,6 +5,7 @@ __date__ = '25/03/15'
 
 import random
 import numpy as np
+import scipy.io
 from collections import Counter
 
 MUNCHKIN = 1
@@ -22,11 +23,13 @@ There are three classes here: Dice, Character, Encounter.
 Dice accepts bonus plus an int —8 is a d8— or a list of dice —[6,6] is a 2d6— or nothing —d20.
     roll() distinguishes between a d20 and not. d20 crits have to be passed manually.
 Character has a boatload of attributes. Below in the main part there are a few monsters declared.
-Encounter has the following attributes:
+Encounter includes the following method:
     battle(reset=1) does a single battle (after a reset of values if asked). it calls a few other fuctions such as roll_for_initiative()
     go_to_war(rounds=1000) performs many battles and gives the team results
-    simulation… Complicated parameter tweaks to obtain plots
 verbosity (verbose=1) is optional.
+
+There is some code messiness resulting from the unclear distinction between Encounter and Creature object, namely
+a Creature interacting with another is generally a Creature method, while a Creature searching across the list of Creatures in the Encounter is an Encounter method.
 
 There are one or two approximations that are marked #NOT-RAW.
 '''
@@ -40,6 +43,20 @@ class Dice:
             self.dice = [dice]
         self.advantage = 0  # TBA
         self.crit = 0  # multiplier+1
+
+    def __str__(self):
+        s=''
+        if len(self.dice)==1: s +='d'+str(self.dice[0])+'+'
+        elif len(self.dice)==2 and self.dice[0] == self.dice[1]: s +='2d'+str(self.dice[0])+'+'
+        elif len(self.dice)==2 and self.dice[0]!= self.dice[1]: s +='d'+str(self.dice[0])+'+d'+'d'+str(self.dice[1])+'+'
+        elif len(self.dice)==3 and self.dice[0] == self.dice[1] == self.dice[1]: s +='3d'+str(self.dice[0])+'+'
+        elif len(self.dice)==3 and self.dice[0]!= self.dice[1]: s +='d'+str(self.dice[0])+'+d'+str(self.dice[1])+'+d'+str(self.dice[1])+'+'
+        else:
+            for x in range(len(self.dice)):
+                s+='d'+str(self.dice[x])+'+'
+        s +=str(self.bonus)
+        return s
+
 
     def multiroll(self, verbose=0):
         result = self.bonus
@@ -161,8 +178,6 @@ class Creature:
         adv = self.alt_attack['attack'].advantage
         if opponent.dodge:
             self.alt_attack['attack'].advantage = -1
-        if opponent.condition == 'netted':
-            print("ISSUE: ACTION WASTED NETTING A NETTED OPPONENT")
         if self.alt_attack['attack'].roll(verbose) >= opponent.ac:
             opponent.condition = 'netted'
             self.tally_hits += 1
@@ -175,7 +190,8 @@ class Creature:
         self.hp -= points
         if verbose: print(self.name + ' took ' + str(points) + ' of damage. Now on ' + str(self.hp) + ' hp.')
         if self.concentrating:
-            dc = 5 + points
+            dc = points/2
+            if dc <10: dc=10
             if self.ability[self.sc_ab].roll() < dc:
                 self.conc_fx()
                 if verbose: print(self.name + ' has lost their concentration')
@@ -211,7 +227,6 @@ class Creature:
 
 
 ######################ARENA######################
-
 class Encounter:
     def __init__(self, *lineup):
         # self.lineup={x.name:x for x in lineup}
@@ -223,6 +238,9 @@ class Encounter:
 
     def add(self, newbie):
         self.combattants.append(newbie)
+
+    class Victory(Exception):
+        pass
 
     def __str__(self):
         string = "=" * 50 + ' ' + self.name + " " + "=" * 50 + "\n"
@@ -240,60 +258,63 @@ class Encounter:
             print("Turn order:")
             print([x.name for x in self.combattants])
 
-    def battle(self, reset=1, verbose=0):
+    def battle(self,reset=1,verbose=0):
         self.tally_battles += 1
         if reset: self.reset()
-        for schmuck in self.lineup:
-            schmuck.tally_battles += 1
-            # anything else?
+        for schmuck in self.lineup: schmuck.tally_battles += 1
         self.roll_for_initiative(verbose)
         while True:
-            if verbose: print('**NEW ROUND**')
-            self.tally_rounds += 1
-            self.dodge = 0
-            for character in self.combattants:
-                if character.isalive():
-                    character.tally_rounds += 1
-                    if len(self.find_opponents(character)) == 0:
-                        if verbose: print(self)
-                        return character.alignment
-                    # BONUS ACTION
-                    # heal check -bonus action.
-                    if character.healing_spells > 0:
-                        weakling = self.find_wounded(character, verbose)
-                        if weakling != 0:
-                            character.cast_healing(weakling, verbose)
-                    #Main action!
-                    economy = len(self.find_allies(character)) > len(self.find_opponents(character)) > 0
-                    #Buff?
-                    if character.condition == 'netted':
-                        #NOT-RAW: DC10 strength check or something equally easy for monsters
-                        if verbose: print(character.name + " freed himself from a net")
-                        character.condition = 'normal'
-                    elif character.buff_spells > 0 and character.concentrating == 0:
-                        character.conc_fx()
-                        if verbose: print(character.name + ' buffs up!')
-                        #greater action economy: waste opponent's turn.
-                    elif economy and character is sorted(self.find_allies(character), key=lambda query: query.hp)[0]:
-                        #weakest: dodge!
-                        if verbose: print(character.name + " is dodging")
-                        character.dodge = 1
-                    elif economy and character.alt_attack['name'] == 'net':
-                        opponent = self.find_target(character, verbose)
-                        character.net(opponent, verbose)
-                    else:
-                        #MULTIATTACK!
-                        for i in range(len(character.attacks)):
-                            opponent = self.find_target(character, verbose)
-                            if opponent == 0:  #has to be checked due to retargetting during multiattack.
-                                if verbose: print(self)
-                                return character.alignment
+            try:
+                if verbose: print('**NEW ROUND**')
+                self.tally_rounds += 1
+                for character in self.combattants:
+                    if character.isalive():
+                        character.dodge=0
+                        character.tally_rounds += 1
+                        if len(self.find_opponents(character)) == 0: raise Encounter.Victory()
+                        # BONUS ACTION
+                        # heal check -bonus action.
+                        if character.healing_spells > 0:
+                            weakling = self.find_wounded(character, verbose)
+                            if weakling != 0:
+                                character.cast_healing(weakling, verbose)
+                        #Main action!
+                        economy = len(self.find_allies(character)) > len(self.find_opponents(character)) > 0
+                        #Buff?
+                        if character.condition == 'netted':
+                            #NOT-RAW: DC10 strength check or something equally easy for monsters
+                            if verbose: print(character.name + " freed himself from a net")
+                            character.condition = 'normal'
+                        elif character.buff_spells > 0 and character.concentrating == 0:
+                            character.conc_fx()
+                            if verbose: print(character.name + ' buffs up!')
+                            #greater action economy: waste opponent's turn.
+                        elif economy and character is sorted(self.find_allies(character), key=lambda query: query.hp)[0]:
+                            if verbose: print(character.name + " is dodging")
+                            character.dodge = 1
+                        elif economy and character.alt_attack['name'] == 'net':
+                            opponent = self.find_hurtful_target(character, verbose)
+                            if opponent.condition !='netted':
+                                character.net(opponent, verbose)
                             else:
-                                character.hit(opponent, i, verbose)
+                                self.multiattack(character,verbose)
+                        else:
+                            self.multiattack(character,verbose)
+            except Encounter.Victory:
+                break
+        if verbose: print(self)
+        return character.alignment
+
+    def multiattack(self,hitter,verbose=0):
+        for i in range(len(hitter.attacks)):
+            opponent = self.find_target(hitter, verbose)
+            hitter.hit(opponent, i, verbose)
 
     def find_target(self, searcher, verbose=0):
         if MUNCHKIN == 1:
             return self.find_weakest_target(searcher, verbose)
+        elif MUNCHKIN ==2:
+            return self.find_hurtful_target(searcher, verbose)
         else:
             return self.find_random_target(searcher, verbose)
 
@@ -304,7 +325,7 @@ class Encounter:
             if verbose: print(searcher.name + " targets " + prey.name + " (most squishy)")
             return prey
         else:
-            return 0
+            raise Encounter.Victory()
 
     def find_random_target(self, searcher, verbose=0):
         targets = self.find_opponents(searcher)
@@ -313,18 +334,18 @@ class Encounter:
             if verbose: print(searcher.name + " targets " + prey.name + " (randomly)")
             return prey
         else:
-            return 0
+            raise Encounter.Victory()
 
     def find_hurtful_target(self, searcher, verbose=0):
         targets = self.find_opponents(searcher)
         # targets=[enemy for enemy in self.find_opponents(searcher) if enemy.condition=='normal']
         if len(targets) > 0:
             bruisers = sorted(targets, key=lambda query: query.hurtful, reverse=True)
-            prey = sorted(bruisers[0], key=lambda query: query.condition != 'normal')
+            prey = sorted(bruisers, key=lambda query: query.condition == 'normal')
             if verbose: print(searcher.name + " targets " + prey.name + " (biggest threat)")
-            return prey
+            return prey[0]
         else:
-            return 0
+            raise Encounter.Victory()
 
     def find_opponents(self, searcher):
         return [query for query in self.combattants if (query.alignment != searcher.alignment) and (query.hp > 0)]
@@ -346,10 +367,6 @@ class Encounter:
 
     def go_to_war(self, rounds=1000):
         return Counter([self.battle() for x in range(rounds)])
-
-    # def simulate(self,tweak=None, rounds=1000):
-    #
-    #    Counter([self.battle() for x in range(rounds)])
 
     def deathmatch(self):
         colours = 'red blue green orange yellow lime cyan violet ultraviolet pink brown black white octarine teal magenta blue-green fuchsia purple cream grey'.split(
@@ -408,6 +425,14 @@ commoner = Creature("Commoner", "good",
                     ac=10, hp=4,
                     attack_parameters=[['club', 2, 0, 4]])
 
+joe = Creature("Joe", "good",
+                    ac=14, hp=18, #bog standard leather-clad level 3.
+                    attack_parameters=[['club', 2, 2, 4]])
+
+antijoe = Creature("antiJoe", "evil",
+                    ac=14, hp=18, #bog standard leather-clad level 3.
+                    attack_parameters=[['shortsword', 2, 2, 6]])
+
 goblin = Creature("Goblin", "evil",
                   ac=15, hp=7,
                   initiative_bonus=2,
@@ -455,11 +480,11 @@ rounds = 1000
 if False:
     duel = Encounter(druid, barbarian)
     barbarian.alignment = "duelist"
-    print(duel.go_to_war(10000))
+    print(duel.go_to_war(1000))
     print(duel)
 
 #CRx?
-if True:
+if False:
     arena = Encounter(druid, bard, generic_tank, barbarian, doppelbard,
                       a_b_dragon)
     #arena.battle(verbose=1)
@@ -475,18 +500,60 @@ if False:
 
 #commoner vs. rat
 if False:
-    rounds=100
-    report = np.zeros((10, 10))
+    rounds=1000
+    report = np.zeros((10, 10,10))
     arena = Encounter(commoner, giant_rat)
-    for y in range(1, 11):
-        for x in range(1, 11):
-            #Variants
-            commoner.hp = 4 * x
-            commoner.ac = 10 + y
-            #battle…
-            r = arena.go_to_war(rounds)
-            report[x-1,y-1]=r['good']/rounds
+    for z in range(1,11):
+        for y in range(1, 11):
+            for x in range(1, 11):
+                #Variants
+                commoner.hp = 4 * x
+                commoner.ac = 10 + y
+                commoner.attacks[0]['damage'].dice=[z*2]
+                r = arena.go_to_war(rounds)
+                report[x-1,y-1,z-1]=r['good']/rounds
     print(report)
+    scipy.io.savemat('simulation.mat',mdict={'battle': report})
+
+if False:
+    rounds=1000
+    arena = Encounter(joe, antijoe)
+    d={}
+    e={}
+    f={}
+    g={}
+    for x in range(2,13,1):
+        joe.attacks[0]['damage'].dice[0]=x
+        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
+        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        d[str(x/2+2.5)]=r
+    for x in range(2,13,1):
+        joe.attacks[0]['damage'].dice=[x,x]
+        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
+        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        e[str(x+3)+".0"]=r
+    for x in range(2,13,1):
+        joe.attacks[0]['damage'].bonus=3
+        joe.attacks[0]['damage'].dice=[x]
+        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
+        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        f[str(x/2+3.5)]=r
+    for x in range(2,13,1):
+        joe.attacks[0]['damage'].bonus=4
+        joe.attacks[0]['damage'].dice=[x]
+        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
+        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        g[str(x/2+4.5)]=r
+    for x in sorted(list(set(list(d.keys())+list(e.keys())+list(f.keys())+list(g.keys())))):
+        s=str(x)+"\t"
+        if x in d.keys(): s+= str(d[x])
+        s+= "\t"
+        if x in e.keys(): s+= str(e[x])
+        s+= "\t"
+        if x in f.keys(): s+= str(f[x])
+        s+= "\t"
+        if x in g.keys(): s+= str(g[x])
+        print(s)
 
 ### KILL PEACEFULLY
 import sys
@@ -495,4 +562,4 @@ sys.exit(0)
 #ANYTHING AFTER THIS WILL BE DISREGARDED
 
 ###DUMPYARD ###########
-#CODE BELOW MAY BE BROKEN
+#CODE HERE MAY BE BROKEN
