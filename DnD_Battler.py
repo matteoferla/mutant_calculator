@@ -4,8 +4,7 @@ __email__ = "matteo.ferla@gmail.com"
 __date__ = '25/03/15'
 
 import random
-import numpy as np
-import scipy.io
+import math
 from collections import Counter
 
 MUNCHKIN = 1
@@ -31,7 +30,7 @@ verbosity (verbose=1) is optional.
 There is some code messiness resulting from the unclear distinction between Encounter and Creature object, namely
 a Creature interacting with another is generally a Creature method, while a Creature searching across the list of Creatures in the Encounter is an Encounter method.
 
-There are one or two approximations that are marked #NOT-RAW.
+There are one or two approximations that are marked #NOT-RAW. In the Encounter.battle method there are some thought on the action choices.
 '''
 ######################DICE######################
 class Dice:
@@ -109,9 +108,8 @@ class Creature:
         self.healing_spells = healing_spells
         self.healing = Dice(healing_bonus, healing_dice)
         self.attack_parameters = attack_parameters
-        self.attacks = [
-            {'name': monoattack[0], 'attack': Dice(monoattack[1], 20), 'damage': Dice(monoattack[2], monoattack[3:])}
-            for monoattack in attack_parameters]
+        self.attacks=[]
+        self.attack_parse(attack_parameters)
         self.alt_attack = {'name': alt_attack[0],
                            'attack': Dice(alt_attack[1], 20)}  # CURRENTLY ONLY NETTING IS OPTION!
         self.alignment = alignment
@@ -145,6 +143,11 @@ class Creature:
                         initiative_bonus=self.initiative.bonus, hp=self.hp, attack_parameters=self.attack_parameters,
                         healing_spells=self.healing_spells, healing_dice=self.healing.dice[0],
                         healing_bonus=self.healing.bonus)
+
+    def attack_parse(self,attack_parameters):
+        self.attacks = [
+            {'name': monoattack[0], 'attack': Dice(monoattack[1], 20), 'damage': Dice(monoattack[2], monoattack[3:])}
+            for monoattack in attack_parameters]
 
 
     def __str__(self):
@@ -238,6 +241,7 @@ class Encounter:
 
     def add(self, newbie):
         self.combattants.append(newbie)
+        self.lineup.append(newbie)
 
     class Victory(Exception):
         pass
@@ -258,6 +262,28 @@ class Encounter:
             print("Turn order:")
             print([x.name for x in self.combattants])
 
+    '''
+    Battle…
+    In a dimentionless model, move action and the main actions dash, disengage, hide, shove back/aside, tumble and overrun are meaningless.
+    weapon attack —default
+    two-weapon attack —
+        Good when the opponent has low AC (<12) if 2nd attack is without proficiency.
+        Stacks with bonuses such as sneak attack or poisoned weapons —neither are in the model.
+        Due to the 1 action for donning/doffing a shield, switch to two handed is valid for unshielded folk only.
+        Best keep two weapon fighting as a prebuild not a combat switch.
+    AoE spell attack — Layout…
+    targetted spell attack —produce flame is a cantrip so could be written up as a weapon. The bigger ones. Spell slots need to be re-written.
+    spell buff —Barkskin is a druidic imperative. Haste? Too much complication.
+    spell debuff —Bane…
+    dodge —targetted and turn economy
+    help —high AC target (>18), turn economy, beefcake ally
+    ready —teamwork preplanning. No way.
+    grapple/climb —very situational. grapple/shove combo or barring somatic.
+    disarm —disarm… grey rules about whether picking it up or kicking it away is an interact/move/bonus/main action.
+        netting is a better option albeit a build.
+    called shot —not an official rule. Turn economy.
+    '''
+
     def battle(self,reset=1,verbose=0):
         self.tally_battles += 1
         if reset: self.reset()
@@ -273,7 +299,7 @@ class Encounter:
                         character.tally_rounds += 1
                         if len(self.find_opponents(character)) == 0: raise Encounter.Victory()
                         # BONUS ACTION
-                        # heal check -bonus action.
+                        # heal check -healing word, a bonus action.
                         if character.healing_spells > 0:
                             weakling = self.find_wounded(character, verbose)
                             if weakling != 0:
@@ -365,8 +391,20 @@ class Encounter:
         else:
             raise NameError('A dead man wants to heal folk')
 
+    def go_to_stat_war(self, rounds=1000):
+        x=Counter([self.battle() for x in range(rounds)])
+        for i in list(x):
+            x[i] /= rounds
+            try:
+                x[i+'_se']=math.sqrt(x[i]*(1-x[i])/rounds)
+            except Exception:
+                x[i+'_se']="NA"
+        return x
+
     def go_to_war(self, rounds=1000):
-        return Counter([self.battle() for x in range(rounds)])
+        x=Counter([self.battle() for x in range(rounds)])
+        self.reset()
+        return x
 
     def deathmatch(self):
         colours = 'red blue green orange yellow lime cyan violet ultraviolet pink brown black white octarine teal magenta blue-green fuchsia purple cream grey'.split(
@@ -378,25 +416,25 @@ class Encounter:
 ########### MAIN #####
 
 
-bard = Creature("Bard", "good",
+netsharpshooter = Creature("net-build bard", "good",
                 hp=18, ac=18,
                 initiative_bonus=2,
                 healing_spells=6, healing_bonus=3, healing_dice=4,
                 attack_parameters=[['rapier', 4, 2, 8]], alt_attack=['net', 4, 0, 0])
 
-doppelbard = Creature("Doppelbard", "good",
+bard = Creature("Bard", "good",
                       hp=18, ac=18,
-                      healing_spells=6, healing_bonus=3,
+                      healing_spells=6, healing_bonus=3, healing_dice=4,
                       initiative_bonus=2,
                       attack_parameters=[['rapier', 4, 2, 8]])
 
 generic_tank = Creature("generic tank", "good",
-                        hp=20, ac=18,
+                        hp=20, ac=17,
                         initiative_bonus=2,
-                        attack_parameters=[['bastard sword', 5, 3, 10]])
+                        attack_parameters=[['great sword', 5, 3, 6,6]])
 
 mega_tank = Creature("mega tank", "good",
-                     hp=24, ac=20,
+                     hp=24, ac=17,
                      initiative_bonus=2,
                      attack_parameters=[['great sword', 5, 3, 10]])
 
@@ -419,19 +457,27 @@ twibear = Creature("Twice Brown Bear Druid",
 giant_rat = Creature("Giant Rat", "evil",
                      hp=7, ac=12,
                      initiative_bonus=2,
-                     attack_parameters=[['bite', 4, 2, 3]])
+                     attack_parameters=[['bite', 4, 2, 4]])
 
 commoner = Creature("Commoner", "good",
                     ac=10, hp=4,
                     attack_parameters=[['club', 2, 0, 4]])
 
+bob = Creature("Bob", "mad",
+                    ac=10, hp=8,
+                    attack_parameters=[['club', 2, 0, 4],['club', 2, 0, 4]])
+
 joe = Creature("Joe", "good",
                     ac=14, hp=18, #bog standard leather-clad level 3.
-                    attack_parameters=[['club', 2, 2, 4]])
+                    attack_parameters=[['shortsword', 2, 2, 6]])
 
 antijoe = Creature("antiJoe", "evil",
                     ac=14, hp=18, #bog standard leather-clad level 3.
                     attack_parameters=[['shortsword', 2, 2, 6]])
+
+hero = Creature("hero", "good",
+                    ac=16, hp=18, #bog standard shielded leather-clad level 3.
+                    attack_parameters=[['longsword', 4, 2, 8]])
 
 goblin = Creature("Goblin", "evil",
                   ac=15, hp=7,
@@ -470,17 +516,35 @@ barbarian = Creature("Barbarian",
                      attack_parameters=[['greatsword', 4, 1, 6, 6], ['frenzy greatsword', 4, 1, 6, 6]],
                      log="hp is doubled due to resistance")
 
+anky=Creature("Ankylosaurus",
+              ac=15, hp=68, alignment='evil',
+              attack_parameters=[['tail',7,4,6,6,6,6]],
+              log="CR 3 700 XP")
+
+allo= Creature("Allosaurus","evil",
+               ac=13, hp=51,
+               attack_parameters=[['claw',6,4,8],['bite',6,4,10,10]])
+
+polar= Creature("polar bear",'evil',
+                ac=12, hp=42,
+                attack_parameters=[['bite',7,5,8],['claw',7,5,6,6]])
 
 ##################################################################
 ################### HERE IS WHERE YOU CAN DECIDE THE LINE UP #####
 
 rounds = 1000
 
+
+#print(Encounter(hero.copy(),hero.copy(),hero.copy(),hero.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
+#print(Encounter(doppelbard.copy(),doppelbard.copy(),generic_tank.copy(),generic_tank.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
+print(Encounter(bard,barbarian,generic_tank,druid,polar.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
+
+
 # Skeezy vs. Gringo
 if False:
     duel = Encounter(druid, barbarian)
     barbarian.alignment = "duelist"
-    print(duel.go_to_war(1000))
+    print(duel.go_to_stat_war(100))
     print(duel)
 
 #CRx?
@@ -507,14 +571,60 @@ if False:
         for y in range(1, 11):
             for x in range(1, 11):
                 #Variants
-                commoner.hp = 4 * x
+                commoner.starting_hp = 4 * x
                 commoner.ac = 10 + y
                 commoner.attacks[0]['damage'].dice=[z*2]
                 r = arena.go_to_war(rounds)
-                report[x-1,y-1,z-1]=r['good']/rounds
+                report[x-1,y-1,z-1]=r['good']
     print(report)
     scipy.io.savemat('simulation.mat',mdict={'battle': report})
 
+
+if False:
+    rounds=1000
+    mobster = commoner.copy()
+    mobster.alignment='evil'
+    arena = Encounter(hill_giant)
+    arena2= Encounter(giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy())
+    arena3=Encounter(mobster) #I am unsure I can initialise an empty encounter…
+    for x in range(16):
+        arena3.add(mobster.copy())
+    for z in range(1,26):
+        arena.add(commoner.copy())
+        arena2.add(commoner.copy())
+        arena3.add(commoner.copy())
+        print(str(z)+"\t"+str(arena2.go_to_war(rounds)['good'])+"\t"+str(arena.go_to_war(rounds)['good'])+"\t"+str(arena3.go_to_war(rounds)['good']))
+
+if False:
+    import numpy as np  #needed solely in the after analysis, not the simulations.
+    import scipy.io     #ditto
+    rounds=1000
+    n=6
+    mobster = commoner.copy()
+    mobster.alignment='evil'
+    mobster.name='mobster'
+    r=np.zeros((n,n))
+    for x in range(n):
+        arena=Encounter()
+        for y in range(x+1):
+            arena.add(commoner.copy())
+        for y in range(n):
+            arena.add(mobster.copy())
+            r[x,y]=arena.go_to_war(rounds)['good']
+            print(r[x,y])
+    scipy.io.savemat('simulation2.mat',mdict={'battle': r})
+
+if False:
+    rounds=1000
+    n=20
+    arena=Encounter(joe,antijoe)
+    for x in range(n):
+        joe.attack_parse([['shortsword', 2+x, 2, 6]])
+        arena.add(bob)
+        y=arena.go_to_stat_war(rounds)
+        print(str(y['good']*100)+" ± "+str(y['good_se']*100))
+
+#proof that there is an equal victory change for all damage combinations with the same value of avg_damage=n_dice(dice_max/2+0.5)+bonus
 if False:
     rounds=1000
     arena = Encounter(joe, antijoe)
@@ -522,24 +632,24 @@ if False:
     for x in range(2,13,1):
         joe.attacks[0]['damage'].dice[0]=x
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        r=round(arena.go_to_war(rounds)['good']*100)
         d[0][str(x/2+2.5)]=r
     for x in range(2,13,1):
         joe.attacks[0]['damage'].dice=[x,x]
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        r=round(arena.go_to_war(rounds)['good']*100)
         d[1][str(x+3)+".0"]=r
     for x in range(2,13,1):
         joe.attacks[0]['damage'].bonus=3
         joe.attacks[0]['damage'].dice=[x]
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        r=round(arena.go_to_war(rounds)['good']*100)
         d[2][str(x/2+3.5)]=r
     for x in range(2,13,1):
         joe.attacks[0]['damage'].bonus=4
         joe.attacks[0]['damage'].dice=[x]
         joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']/rounds*100)
+        r=round(arena.go_to_war(rounds)['good']*100)
         d[3][str(x/2+4.5)]=r
     for x in sorted(list(set(list(d[0].keys())+list(d[1].keys())+list(d[2].keys())+list(d[3].keys())))):
         s=str(x)+"\t"
@@ -555,4 +665,4 @@ sys.exit(0)
 #ANYTHING AFTER THIS WILL BE DISREGARDED
 
 ###DUMPYARD ###########
-#CODE HERE MAY BE BROKEN
+#CODE BELOW HERE MAY BE BROKEN
