@@ -1,5 +1,5 @@
 __author__ = "Matteo"
-__copyright__ = "Go away"
+__copyright__ = "Don't blame me for a TPK"
 __email__ = "matteo.ferla@gmail.com"
 __date__ = '25/03/15'
 
@@ -7,14 +7,15 @@ import random
 import math
 from collections import Counter
 
-MUNCHKIN = 1
+TARGET ='enemy alive weakest'
+#target='enemy alive weakest', target='enemy alive random', target='enemy alive fiersomest'
 
 '''
 Welcome to the D&D Battle simulator.
 
 Go to the § HERE IS WHERE YOU CAN DECIDE THE LINE UP if you want to try it out.
 The similator is set up as a munchkin combat where everyone targets the weakest due to find_weakest_target method of the Encounter class.
-Changing MUNCHKIN (above) to 0 will use the find_random_target method —however, some muchkinishness still remains.
+Changing TARGET (above) to something else will change the targetting.
 The muchkinishness has a deleterious side-effect when the method deathmatch of the Encounter class is invoked —this allocates each Creature object in the Encounter object in a different team.
 
 The nitty-gritty:
@@ -130,6 +131,8 @@ class Creature:
         self.conc_fx = getattr(self, buff)
         self.log = log
         self.xp = xp
+        self.tally_hp=self.hp
+        self.tally_healing_spells=self.healing_spells
 
         self.hurtful = 0
         for x in self.attacks:
@@ -151,14 +154,39 @@ class Creature:
 
 
     def __str__(self):
-        if self.tally_battles == 0: self.tally_battles = 1
-        return self.name + ": {team=" + self.alignment + "; current hp=" + str(self.hp) + " (from " + str(
-            self.starting_hp) + "); healing spells left=" + str(self.healing_spells) + " (from " + str(
+        if self.tally_battles == 0:
+            self.tally_battles = 1
+            #I should fix it up afterwards
+        return self.name + ": {team=" + self.alignment + "; current hp=" + str(self.tally_hp / self.tally_battles) + " (from " + str(
+            self.starting_hp) + "); healing spells left=" + str(self.tally_healing_spells / self.tally_battles) + " (from " + str(
             self.starting_healing_spells) + "); damage done (per battle average)= " + str(
             self.tally_damage / self.tally_battles) + "; hits/misses (PBA)= " + str(
             self.tally_hits / self.tally_battles) + "/" + str(
             self.tally_misses / self.tally_battles) + "; rounds (PBA)=" + str(
             self.tally_rounds / self.tally_battles) + ";}"
+
+    def isalive(self):
+        if self.hp > 0: return 1
+
+    def take_damage(self, points, verbose=0):
+        self.hp -= points
+        if verbose: print(self.name + ' took ' + str(points) + ' of damage. Now on ' + str(self.hp) + ' hp.')
+        if self.concentrating:
+            dc = points/2
+            if dc <10: dc=10
+            if self.ability[self.sc_ab].roll() < dc:
+                self.conc_fx()
+                if verbose: print(self.name + ' has lost their concentration')
+
+    def ready(self):
+        self.dodge=0
+        #there should be a few more.
+        #conditions.
+
+    def reset(self):
+        self.hp = self.starting_hp
+        if self.concentrating: self.conc_fx()
+        self.healing_spells = self.starting_healing_spells
 
     def hit(self, opponent, i=0, verbose=0):
         adv = self.attacks[i]['attack'].advantage
@@ -170,7 +198,7 @@ class Creature:
         if self.attacks[i]['attack'].roll(verbose) >= opponent.ac:
             self.attacks[i]['damage'].crit = self.attacks[i]['attack'].crit  #Pass the crit if present.
             h = self.attacks[i]['damage'].roll(verbose)
-            opponent.wound(h, verbose)
+            opponent.take_damage(h, verbose)
             self.tally_damage += h
             self.tally_hits += 1
         else:
@@ -189,15 +217,6 @@ class Creature:
             self.tally_misses += 1
         self.alt_attack['attack'].advantage = adv
 
-    def wound(self, points, verbose=0):
-        self.hp -= points
-        if verbose: print(self.name + ' took ' + str(points) + ' of damage. Now on ' + str(self.hp) + ' hp.')
-        if self.concentrating:
-            dc = points/2
-            if dc <10: dc=10
-            if self.ability[self.sc_ab].roll() < dc:
-                self.conc_fx()
-                if verbose: print(self.name + ' has lost their concentration')
 
     def cast_barkskin(self):
         if self.concentrating == 0:
@@ -215,54 +234,161 @@ class Creature:
         self.hp += points
         if verbose: print(self.name + ' was healed by ' + str(points) + '. Now on ' + str(self.hp) + ' hp.')
 
+
+    def assess_wounded(self,arena, verbose=0):
+            targets = arena.find('bloodiest allies',team=self.alignment)
+            if len(targets) > 0:
+                weakling = targets[0]
+                if weakling.starting_hp > (self.healing.dice[0] + self.healing.bonus + weakling.hp):
+                    if verbose: print(self.name + " wants to heal " + weakling.name)
+                    return weakling
+                else:
+                    return 0
+            else:
+                raise NameError('A dead man wants to heal folk')
+
     def cast_healing(self, weakling, verbose=0):
         if self.healing_spells > 0:
             weakling.heal(self.healing.roll(), verbose)
             self.healing_spells -= 1
 
-    def isalive(self):
-        if self.hp > 0: return 1
+    def multiattack(self,arena,verbose=0):
+        for i in range(len(self.attacks)):
+            try:
+                opponent = arena.find(TARGET,self, verbose)[0]
+            except IndexError:
+                raise arena.Victory()
+            if verbose:
+                print(self.name + ' attacks '+opponent.name+' with '+self.attacks[i]['name'])
+            self.hit(opponent, i, verbose)
 
-    def reset(self):
-        self.hp = self.starting_hp
-        if self.concentrating: self.conc_fx()
-        self.healing_spells = self.starting_healing_spells
+
+    #TODO Finish…
+    #action.
+    #weight set
+    #act.
+
+    def check_action(self,arena, verbose):
+        #do something
+        return 0
+
+    def do_action(self,arena,verbose):
+        #do it.
+        pass
+
+    def TBA_act(self,arena,verbose=0):
+        if not arena.find('alive enemy'):
+            raise Encounter.Victory()
+        #self.actions={}?
+        self.check_action()
+
+    def act(self,arena,verbose=0):
+        if not arena.find('alive enemy'):
+            raise Encounter.Victory()
+        # BONUS ACTION
+        # heal  -healing word, a bonus action.
+        if self.healing_spells > 0:
+            weakling = self.assess_wounded(arena,verbose)
+            if weakling != 0:
+                self.cast_healing(weakling, verbose)
+        #Main action!
+        economy = len(arena.find('allies')) > len(arena.find('opponents')) > 0
+        #Buff?
+        if self.condition == 'netted':
+            #NOT-RAW: DC10 strength check or something equally easy for monsters
+            if verbose: print(self.name + " freed himself from a net")
+            self.condition = 'normal'
+        elif self.buff_spells > 0 and self.concentrating == 0:
+            self.conc_fx()
+            if verbose: print(self.name + ' buffs up!')
+            #greater action economy: waste opponent's turn.
+        elif economy and self is arena.find('weakest allies')[0]:
+            if verbose: print(self.name + " is dodging")
+            self.dodge = 1
+        elif economy and self.alt_attack['name'] == 'net':
+            opponent = arena.find('fiersomest enemy alive', self, verbose)[0]
+            if opponent.condition !='netted':
+                self.net(opponent, verbose)
+            else:
+                self.multiattack(arena,verbose)
+        else:
+            self.multiattack(arena,verbose)
+
 
 
 ######################ARENA######################
-class Encounter:
-    def __init__(self, *lineup):
-        # self.lineup={x.name:x for x in lineup}
-        self.lineup = list(lineup)  #Classic fuck-up
-        self.combattants = list(lineup)
-        self.tally_rounds = 0
-        self.tally_battles = 0
-        self.name = 'Encounter'
-
-    def add(self, newbie):
-        self.combattants.append(newbie)
-        self.lineup.append(newbie)
-
+class Encounter():
     class Victory(Exception):
         pass
 
+    def __init__(self, *lineup):
+        # self.lineup={x.name:x for x in lineup}
+        #self.lineup = list(lineup)  #Classic fuck-up
+        self.combattants = list(lineup)
+        self.tally_rounds = 0
+        self.tally_battles = 0
+        self.active=lineup[0]
+        self.name = 'Encounter'
+        self.check()
+        self.note=''
+
+    def check(self):
+        self.sides = set([dude.alignment for dude in self])
+        self.tally_perfect = {side: 0 for side in self.sides}
+        self.tally_close = {side: 0 for side in self.sides}
+        self.tally_victories = {side: 0 for side in self.sides}
+
+    def append(self, newbie):
+        self.combattants.append(newbie)
+        self.check()
+
+    def extend(self, iterable):
+        for x in iterable:
+            self.append(x)
+
     def __str__(self):
         string = "=" * 50 + ' ' + self.name + " " + "=" * 50 + "\n"
-        string += "Battles: " + str(self.tally_battles) + "; Sum of rounds:" + str(self.tally_rounds) + ";\n"
+        string += "Battles: " + str(self.tally_battles) + "; Sum of rounds: " + str(self.tally_rounds) + "; " + self.note + "\n"
+        for s in self.sides:
+            string += "> Team " + str(s) + " = winning battles: " + str(self.tally_victories[s]) + "; perfect battles: " + str(self.tally_perfect[s]) + "; close-call battles: " + str(self.tally_close[s])+ ";\n"
+        string += "-" * 49 + " Combattants  " + "-" * 48 + "\n"
         for fighter in self.combattants: string += str(fighter) + "\n"
         return string
+
+    def __len__(self):
+        return len(self.combattants)
+
+    def __add__(self, other):
+        return Encounter(self.combattants,other.combattants)
+
+    def __iter__(self):
+        return iter(self.combattants)
+
+    def __getitem__(self, item):
+        for character in self:
+            if character.name == item:
+                return character
+        raise Exception('Nobody by this name')
 
     def reset(self):
         for schmuck in self.combattants:
             schmuck.reset()
+        return self
+
+    def set_deathmatch(self):
+        colours = 'red blue green orange yellow lime cyan violet ultraviolet pink brown black white octarine teal magenta blue-green fuchsia purple cream grey'.split(
+            ' ')
+        for schmuck in self:
+            schmuck.alignment = colours.pop(0) + " team"
+        return self
 
     def roll_for_initiative(self, verbose=0):
-        self.combattants = sorted(self.lineup, key=lambda fighter: fighter.initiative.roll())
+        self.combattants = sorted(self.combattants, key=lambda fighter: fighter.initiative.roll())
         if verbose:
             print("Turn order:")
-            print([x.name for x in self.combattants])
+            print([x.name for x in self])
 
-    '''
+    __doc__ = '''
     Battle…
     In a dimentionless model, move action and the main actions dash, disengage, hide, shove back/aside, tumble and overrun are meaningless.
     weapon attack —default
@@ -284,134 +410,117 @@ class Encounter:
     called shot —not an official rule. Turn economy.
     '''
 
-    def battle(self,reset=1,verbose=0):
+    def battle(self,reset=1,verbose=1):
         self.tally_battles += 1
         if reset: self.reset()
-        for schmuck in self.lineup: schmuck.tally_battles += 1
+        for schmuck in self: schmuck.tally_battles += 1
         self.roll_for_initiative(verbose)
         while True:
             try:
                 if verbose: print('**NEW ROUND**')
                 self.tally_rounds += 1
-                for character in self.combattants:
+                for character in self:
+                    character.ready()
                     if character.isalive():
-                        character.dodge=0
+                        self.active=character
                         character.tally_rounds += 1
-                        if len(self.find_opponents(character)) == 0: raise Encounter.Victory()
-                        # BONUS ACTION
-                        # heal check -healing word, a bonus action.
-                        if character.healing_spells > 0:
-                            weakling = self.find_wounded(character, verbose)
-                            if weakling != 0:
-                                character.cast_healing(weakling, verbose)
-                        #Main action!
-                        economy = len(self.find_allies(character)) > len(self.find_opponents(character)) > 0
-                        #Buff?
-                        if character.condition == 'netted':
-                            #NOT-RAW: DC10 strength check or something equally easy for monsters
-                            if verbose: print(character.name + " freed himself from a net")
-                            character.condition = 'normal'
-                        elif character.buff_spells > 0 and character.concentrating == 0:
-                            character.conc_fx()
-                            if verbose: print(character.name + ' buffs up!')
-                            #greater action economy: waste opponent's turn.
-                        elif economy and character is sorted(self.find_allies(character), key=lambda query: query.hp)[0]:
-                            if verbose: print(character.name + " is dodging")
-                            character.dodge = 1
-                        elif economy and character.alt_attack['name'] == 'net':
-                            opponent = self.find_hurtful_target(character, verbose)
-                            if opponent.condition !='netted':
-                                character.net(opponent, verbose)
-                            else:
-                                self.multiattack(character,verbose)
-                        else:
-                            self.multiattack(character,verbose)
+                        character.act(self, verbose)
             except Encounter.Victory:
                 break
+        #closing up maths
+        side=self.active.alignment
+        team=self.find('allies')
+        self.tally_victories[side] += 1
+        perfect=1
+        close=0
+        for x in team:
+            if x.hp < x.starting_hp:
+                perfect = 0
+            if x.hp < 0:
+                close =1
+        if not perfect:
+            self.tally_perfect[side] += perfect
+        self.tally_close[side] += close
+        for character in self:
+            character.tally_hp +=character.hp
+            character.tally_healing_spells +=character.healing_spells
         if verbose: print(self)
-        return character.alignment
+        #return self or side?
+        return self
 
-    def multiattack(self,hitter,verbose=0):
-        for i in range(len(hitter.attacks)):
-            opponent = self.find_target(hitter, verbose)
-            hitter.hit(opponent, i, verbose)
-
-    def find_target(self, searcher, verbose=0):
-        if MUNCHKIN == 1:
-            return self.find_weakest_target(searcher, verbose)
-        elif MUNCHKIN ==2:
-            return self.find_hurtful_target(searcher, verbose)
-        else:
-            return self.find_random_target(searcher, verbose)
-
-    def find_weakest_target(self, searcher, verbose=0):
-        targets = self.find_opponents(searcher)
-        if len(targets) > 0:
-            prey = sorted(targets, key=lambda query: query.hp)[0]
-            if verbose: print(searcher.name + " targets " + prey.name + " (most squishy)")
-            return prey
-        else:
-            raise Encounter.Victory()
-
-    def find_random_target(self, searcher, verbose=0):
-        targets = self.find_opponents(searcher)
-        if len(targets) > 0:
-            prey = random.choice(targets)
-            if verbose: print(searcher.name + " targets " + prey.name + " (randomly)")
-            return prey
-        else:
-            raise Encounter.Victory()
-
-    def find_hurtful_target(self, searcher, verbose=0):
-        targets = self.find_opponents(searcher)
-        # targets=[enemy for enemy in self.find_opponents(searcher) if enemy.condition=='normal']
-        if len(targets) > 0:
-            bruisers = sorted(targets, key=lambda query: query.hurtful, reverse=True)
-            prey = sorted(bruisers, key=lambda query: query.condition == 'normal')
-            if verbose: print(searcher.name + " targets " + prey.name + " (biggest threat)")
-            return prey[0]
-        else:
-            raise Encounter.Victory()
-
-    def find_opponents(self, searcher):
-        return [query for query in self.combattants if (query.alignment != searcher.alignment) and (query.hp > 0)]
-
-    def find_allies(self, searcher, verbose=0):
-        return [query for query in self.combattants if (query.alignment == searcher.alignment)]
-
-    def find_wounded(self, searcher, verbose=0):
-        targets = self.find_allies(searcher)
-        if len(targets) > 0:
-            weakling = sorted(targets, key=lambda query: query.hp - query.starting_hp)[0]
-            if weakling.starting_hp > (searcher.healing.dice[0] + searcher.healing.bonus + weakling.hp):
-                if verbose: print(searcher.name + " wants to heal " + weakling.name)
-                return weakling
-            else:
-                return 0
-        else:
-            raise NameError('A dead man wants to heal folk')
-
-    def go_to_stat_war(self, rounds=1000):
-        x=Counter([self.battle() for x in range(rounds)])
+    def go_to_war(self, rounds=1000):
+        for i in range(rounds):
+            self.battle(1,0)
+        x={y:self.tally_victories[y] for y in self.sides}
+        se={}
         for i in list(x):
             x[i] /= rounds
             try:
-                x[i+'_se']=math.sqrt(x[i]*(1-x[i])/rounds)
+                se[i]=math.sqrt(x[i]*(1-x[i])/rounds)
             except Exception:
-                x[i+'_se']="NA"
-        return x
-
-    def go_to_war(self, rounds=1000):
-        x=Counter([self.battle() for x in range(rounds)])
+                se[i]="NA"
         self.reset()
-        return x
+        for i in list(x):
+            self.note +=str(i) +': ' + str(round(x[i],2)) +' ± ' + str(round(se[i],2)) + '; '
+        return self
 
-    def deathmatch(self):
-        colours = 'red blue green orange yellow lime cyan violet ultraviolet pink brown black white octarine teal magenta blue-green fuchsia purple cream grey'.split(
-            ' ')
-        for schmuck in self.combattants:
-            schmuck.alignment = colours.pop(0) + " team"
 
+    def find(self, what, searcher=None, verbose=0, team=None):
+
+        def _enemies(folk):
+            return [query for query in folk if (query.alignment != team)]
+
+        def _allies(folk):
+            return [query for query in folk if (query.alignment == team)]
+
+        def _alive(folk):
+            return [query for query in folk if (query.hp > 0)]
+
+        def _normal(folk):
+            return [joe for joe in folk if joe.condition == 'normal']
+
+        def _random(folk):
+            return random.shuffle(folk)
+
+        def _weakest(folk):
+            return sorted(folk, key=lambda query: query.hp)
+
+        def _bloodiest(folk):
+            return sorted(folk, key=lambda query: query.hp - query.starting_hp)
+
+        def _fiersomest(folk):
+            return sorted(folk, key=lambda query: query.hurtful, reverse=True)
+
+        def _opponents(folk):
+            return _alive(_enemies(folk))
+
+        searcher = searcher or self.active
+        team = team or searcher.alignment
+        folk=self.combattants
+        todo=list(what.split(' '))
+        opt={
+            'enemies':_enemies,
+            'enemy':_enemies,
+            'opponents':_opponents,
+            'allies':_allies,
+            'ally':_allies,
+            'normal':_normal,
+            'alive':_alive,
+            'fiersomest':_fiersomest,
+            'weakest':_weakest,
+            'random':_random,
+            'bloodiest':_bloodiest
+        }
+        for cmd in list(todo):
+            if folk==None:
+                folk=[]
+            for o in opt:
+                if (cmd == o):
+                    folk= opt[o](folk)
+                    todo.remove(cmd)
+        if todo:
+            raise Exception(str(cmd) + ' field not found')
+        return folk
 
 ########### MAIN #####
 
@@ -468,11 +577,11 @@ bob = Creature("Bob", "mad",
                     attack_parameters=[['club', 2, 0, 4],['club', 2, 0, 4]])
 
 joe = Creature("Joe", "good",
-                    ac=14, hp=18, #bog standard leather-clad level 3.
+                    ac=17, hp=103, #bog standard leather-clad level 3.
                     attack_parameters=[['shortsword', 2, 2, 6]])
 
 antijoe = Creature("antiJoe", "evil",
-                    ac=14, hp=18, #bog standard leather-clad level 3.
+                    ac=17, hp=103, #bog standard leather-clad level 3.
                     attack_parameters=[['shortsword', 2, 2, 6]])
 
 hero = Creature("hero", "good",
@@ -529,22 +638,46 @@ polar= Creature("polar bear",'evil',
                 ac=12, hp=42,
                 attack_parameters=[['bite',7,5,8],['claw',7,5,6,6]])
 
+test = Creature("Test", "good",
+                    ac=10, hp=100,
+                    attack_parameters=[['club', 2, 0, 4]])
+
+inert = Creature("Test", "bad",
+                    ac=10, hp=20,
+                    attack_parameters=[['toothpick', 0, 0, 2]])
+
 ##################################################################
 ################### HERE IS WHERE YOU CAN DECIDE THE LINE UP #####
 
 rounds = 1000
 
+Encounter(barbarian, giant_rat.copy(), bard,polar).battle(verbose=1)
+
+
+### KILL PEACEFULLY
+import sys
+
+sys.exit(0)
+#ANYTHING AFTER THIS WILL BE DISREGARDED
+
+###DUMPYARD ###########
+#CODE HERE MAY BE BROKEN
+
+
 
 #print(Encounter(hero.copy(),hero.copy(),hero.copy(),hero.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
 #print(Encounter(doppelbard.copy(),doppelbard.copy(),generic_tank.copy(),generic_tank.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
-print(Encounter(bard,barbarian,generic_tank,druid,polar.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
+#print(Encounter(bard,barbarian,generic_tank,druid,polar.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
 
+#joe.attack_parse([['d12', 2, 4, 12]])
+#antijoe.attack_parse([['2d6', 2, 4, 6, 6]])
+#print(Encounter(joe,antijoe).go_to_stat_war(rounds))
 
 # Skeezy vs. Gringo
 if False:
     duel = Encounter(druid, barbarian)
     barbarian.alignment = "duelist"
-    print(duel.go_to_stat_war(100))
+    print(duel.go_to_war(100))
     print(duel)
 
 #CRx?
@@ -557,10 +690,8 @@ if False:
 
 if False:
     MUNCHKIN = 0  #Killing the weakest on PVP seems a bad strategy
-    pvp = Encounter(druid, bard, generic_tank, barbarian, doppelbard)
-    pvp.deathmatch()
-    print(pvp.go_to_war())
-    print(pvp)
+    print(Encounter(druid, bard, generic_tank, barbarian, doppelbard).set_deathmatch().go_to_war())
+
 
 #commoner vs. rat
 if False:
@@ -588,11 +719,11 @@ if False:
     arena2= Encounter(giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy())
     arena3=Encounter(mobster) #I am unsure I can initialise an empty encounter…
     for x in range(16):
-        arena3.add(mobster.copy())
+        arena3.append(mobster.copy())
     for z in range(1,26):
-        arena.add(commoner.copy())
-        arena2.add(commoner.copy())
-        arena3.add(commoner.copy())
+        arena.append(commoner.copy())
+        arena2.append(commoner.copy())
+        arena3.append(commoner.copy())
         print(str(z)+"\t"+str(arena2.go_to_war(rounds)['good'])+"\t"+str(arena.go_to_war(rounds)['good'])+"\t"+str(arena3.go_to_war(rounds)['good']))
 
 if False:
@@ -607,9 +738,9 @@ if False:
     for x in range(n):
         arena=Encounter()
         for y in range(x+1):
-            arena.add(commoner.copy())
+            arena.append(commoner.copy())
         for y in range(n):
-            arena.add(mobster.copy())
+            arena.append(mobster.copy())
             r[x,y]=arena.go_to_war(rounds)['good']
             print(r[x,y])
     scipy.io.savemat('simulation2.mat',mdict={'battle': r})
@@ -620,7 +751,7 @@ if False:
     arena=Encounter(joe,antijoe)
     for x in range(n):
         joe.attack_parse([['shortsword', 2+x, 2, 6]])
-        arena.add(bob)
+        arena.append(bob)
         y=arena.go_to_stat_war(rounds)
         print(str(y['good']*100)+" ± "+str(y['good_se']*100))
 
@@ -657,12 +788,3 @@ if False:
             if x in d[y].keys(): s+= str(d[y][x])
             s+= "\t"
         print(s)
-
-### KILL PEACEFULLY
-import sys
-
-sys.exit(0)
-#ANYTHING AFTER THIS WILL BE DISREGARDED
-
-###DUMPYARD ###########
-#CODE BELOW HERE MAY BE BROKEN
