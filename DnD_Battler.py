@@ -35,14 +35,15 @@ There are one or two approximations that are marked #NOT-RAW. In the Encounter.b
 '''
 ######################DICE######################
 class Dice:
-    def __init__(self, bonus=0, dice=20):
+    def __init__(self, bonus=0, dice=20, avg = False):
         self.bonus = bonus
         if type(dice) is list:
             self.dice = dice
         else:
             self.dice = [dice]
         self.advantage = 0  # TBA
-        self.crit = 0  # multiplier+1
+        self.crit = 0  # multiplier+1. Actually you can't get a crit train anymore.
+        self.avg = avg
 
     def __str__(self):
         s=''
@@ -61,7 +62,13 @@ class Dice:
     def multiroll(self, verbose=0):
         result = self.bonus
         for d in self.dice:
-            for x in range(0, self.crit + 1): result += random.randint(1, d)
+            if self.avg:  #NPC rolls
+                if self.crit:
+                    result += d
+                else:
+                    result +=round(d/2+1)
+            else:
+                for x in range(0, self.crit + 1): result += random.randint(1, d)
         self.crit = 0
         return result
 
@@ -86,7 +93,7 @@ class Dice:
         else:
             return result
 
-    def roll(self, verbose=0):  # THIS ASSUMES NO WEAPON DOES d20 DAMAGE!! Dragonstar and Siege engines don't.
+    def roll(self, crit=None, verbose=0):  # THIS ASSUMES NO WEAPON DOES d20 DAMAGE!! Dragonstar and Siege engines don't.
         if self.dice[0] == 20:
             return self.icosaroll(verbose)
         else:
@@ -96,34 +103,52 @@ class Dice:
 ######################CREATURE######################
 
 class Creature:
-    def __init__(self, name, alignment="good", ac=10, initiative_bonus=0, hp=1, attack_parameters=[['club', 2, 0, 4]],
+    def __init__(self, name, alignment="good", ac=10, initiative_bonus=None, hp=None, attack_parameters=[['club', 2, 0, 4]],
                  alt_attack=['none', 0],
-                 healing_spells=0, healing_dice=4, healing_bonus=0, ability=[0, 0, 0, 0, 0, 0], sc_ability='wis',
-                 buff='cast_nothing', buff_spells=0, log=None, xp=0):
+                 healing_spells=0, healing_dice=4, healing_bonus=None, ability=[0, 0, 0, 0, 0, 0], sc_ability='wis',
+                 buff='cast_nothing', buff_spells=0, log=None, xp=0, hd=6, level=1, proficiency=2):
+
         self.name = name
         self.ac = ac
-        self.starting_hp = hp
-        self.hp = hp
+
+        #build from scratch
+        self.proficiency=proficiency
+        if isinstance(ability, list):
+            self.ability = {y: x for x, y in zip(ability, ['str', 'dex', 'con', 'wis', 'int', 'cha'])}
+        elif isinstance(ability, dict):
+            self.ability = {'str':0, 'dex':0, 'con':0, 'wis':0, 'int':0, 'cha':0}
+            self.ability.update(ability)
+        else:
+            raise NameError('ability can be a list of six, or a incomplete dictionary')
+        self.hd=Dice(self.ability['con'],hd, avg=True)
+        if hp:
+            self.hp = hp
+            self.starting_hp = self.hp
+        else:
+            self.set_level(level)
+        #init
+        if not initiative_bonus:
+            initiative_bonus=self.ability['dex']
         self.initiative = Dice(initiative_bonus, 20)
+        #spell
+        self.sc_ab = sc_ability  #spell casting ability
+        if not healing_bonus:
+            healing_bonus=self.ability[self.sc_ab]
         self.starting_healing_spells = healing_spells
         self.healing_spells = healing_spells
         self.healing = Dice(healing_bonus, healing_dice)
-        self.attack_parameters = attack_parameters
         self.attacks=[]
+        self.hurtful = 0
+        self.attack_parameters = attack_parameters
         self.attack_parse(attack_parameters)
         self.alt_attack = {'name': alt_attack[0],
                            'attack': Dice(alt_attack[1], 20)}  # CURRENTLY ONLY NETTING IS OPTION!
         self.alignment = alignment
-        self.ability = {y: Dice(x, 20) for x, y in zip(ability, ['str', 'dex', 'con', 'wis', 'int', 'cha'])}
-        self.sc_ab = sc_ability
         # internal stuff
-        self.tally_damage = 0
-        self.tally_hits = 0
-        self.tally_misses = 0
-        self.tally_battles = 0
-        self.tally_rounds = 0
+        self.tally={'damage':0, 'hits':0, 'misses':0, 'battles':0, 'rounds':0, 'hp': self.hp, 'healing_spells':self.healing_spells}
         self.copy_index = 1
         self.condition = 'normal'
+
         self.dodge = 0
         self.concentrating = 0
         self.temp = 0
@@ -131,14 +156,20 @@ class Creature:
         self.conc_fx = getattr(self, buff)
         self.log = log
         self.xp = xp
-        self.tally_hp=self.hp
-        self.tally_healing_spells=self.healing_spells
+        self.arena=None
 
-        self.hurtful = 0
-        for x in self.attacks:
-            self.hurtful += x['damage'].bonus
-            self.hurtful += (sum(x['damage'].dice) + len(
-                x['damage'].dice)) / 2  #the average roll of a d6 is not 3 but 3.5
+    def set_level(self, level):
+        self.hp=0
+        self.hd.crit=1  #Not-RAW first level is always max for PCs, but not monsters.
+        for x in range(level):
+            self.hp +=self.hd.roll()
+        self.level=level
+        self.starting_hp=self.hp
+        self.proficiency=1+round((level)/4)
+        #self.attack_parse(attack_parameters)
+
+
+
 
     def copy(self):
         self.copy_index += 1
@@ -151,19 +182,24 @@ class Creature:
         self.attacks = [
             {'name': monoattack[0], 'attack': Dice(monoattack[1], 20), 'damage': Dice(monoattack[2], monoattack[3:])}
             for monoattack in attack_parameters]
+        for x in self.attacks:
+            self.hurtful += x['damage'].bonus
+            self.hurtful += (sum(x['damage'].dice) + len(
+                x['damage'].dice)) / 2  #the average roll of a d6 is not 3 but 3.5
 
 
     def __str__(self):
-        if self.tally_battles == 0:
-            self.tally_battles = 1
+        battles=1
+        if self.tally['battles'] > 0:
+            battles=self.tally['battles']
             #I should fix it up afterwards
-        return self.name + ": {team=" + self.alignment + "; current hp=" + str(self.tally_hp / self.tally_battles) + " (from " + str(
-            self.starting_hp) + "); healing spells left=" + str(self.tally_healing_spells / self.tally_battles) + " (from " + str(
+        return self.name + ": {team=" + self.alignment + "; current hp=" + str(self.tally['hp'] / battles) + " (from " + str(
+            self.starting_hp) + "); healing spells left=" + str(self.tally['healing_spells'] / battles) + " (from " + str(
             self.starting_healing_spells) + "); damage done (per battle average)= " + str(
-            self.tally_damage / self.tally_battles) + "; hits/misses (PBA)= " + str(
-            self.tally_hits / self.tally_battles) + "/" + str(
-            self.tally_misses / self.tally_battles) + "; rounds (PBA)=" + str(
-            self.tally_rounds / self.tally_battles) + ";}"
+            self.tally['damage'] / battles) + "; hits/misses (PBA)= " + str(
+            self.tally['hits'] / battles) + "/" + str(
+            self.tally['misses'] / battles) + "; rounds (PBA)=" + str(
+            self.tally['rounds'] / battles) + ";}"
 
     def isalive(self):
         if self.hp > 0: return 1
@@ -174,7 +210,7 @@ class Creature:
         if self.concentrating:
             dc = points/2
             if dc <10: dc=10
-            if self.ability[self.sc_ab].roll() < dc:
+            if Dice(self.ability[self.sc_ab]).roll() < dc:
                 self.conc_fx()
                 if verbose: print(self.name + ' has lost their concentration')
 
@@ -188,34 +224,25 @@ class Creature:
         if self.concentrating: self.conc_fx()
         self.healing_spells = self.starting_healing_spells
 
-    def hit(self, opponent, i=0, verbose=0):
-        adv = self.attacks[i]['attack'].advantage
+    def check_advantage(self,opponent):
+        adv=0
         if opponent.dodge:
-            self.attacks[i]['attack'].advantage = -1
-        if opponent.condition == 'netted':
-            self.attacks[i]['attack'].advantage = 1
+            adv += -1
+        if (opponent.condition == 'netted') or (opponent.condition == 'restrained'):
+            adv += 1
         # Per coding it is impossible that a netted creature attempts an attack.
-        if self.attacks[i]['attack'].roll(verbose) >= opponent.ac:
-            self.attacks[i]['damage'].crit = self.attacks[i]['attack'].crit  #Pass the crit if present.
-            h = self.attacks[i]['damage'].roll(verbose)
-            opponent.take_damage(h, verbose)
-            self.tally_damage += h
-            self.tally_hits += 1
-        else:
-            self.tally_misses += 1
-        self.attacks[i]['attack'].advantage = adv
+        if (self.condition == 'netted') or (self.condition == 'restrained'):
+            adv += -1
+        return adv
 
     def net(self, opponent, verbose=0):
-        adv = self.alt_attack['attack'].advantage
-        if opponent.dodge:
-            self.alt_attack['attack'].advantage = -1
+        self.alt_attack['attack'].advantage= self.check_advantage(opponent)
         if self.alt_attack['attack'].roll(verbose) >= opponent.ac:
             opponent.condition = 'netted'
-            self.tally_hits += 1
+            self.tally['hits'] += 1
             if verbose: print(self.name + " netted " + opponent.name)
         else:
-            self.tally_misses += 1
-        self.alt_attack['attack'].advantage = adv
+            self.tally['misses'] += 1
 
 
     def cast_barkskin(self):
@@ -235,8 +262,8 @@ class Creature:
         if verbose: print(self.name + ' was healed by ' + str(points) + '. Now on ' + str(self.hp) + ' hp.')
 
 
-    def assess_wounded(self,arena, verbose=0):
-            targets = arena.find('bloodiest allies',team=self.alignment)
+    def assess_wounded(self, verbose=0):
+            targets = self.arena.find('bloodiest allies',team=self.alignment)
             if len(targets) > 0:
                 weakling = targets[0]
                 if weakling.starting_hp > (self.healing.dice[0] + self.healing.bonus + weakling.hp):
@@ -252,47 +279,56 @@ class Creature:
             weakling.heal(self.healing.roll(), verbose)
             self.healing_spells -= 1
 
-    def multiattack(self,arena,verbose=0):
+    def multiattack(self,verbose=0, assess=0):
+        if assess:
+            return 0  #the default
         for i in range(len(self.attacks)):
             try:
-                opponent = arena.find(TARGET,self, verbose)[0]
+                opponent = self.arena.find(TARGET,self, verbose)[0]
             except IndexError:
-                raise arena.Victory()
+                raise self.arena.Victory()
             if verbose:
                 print(self.name + ' attacks '+opponent.name+' with '+self.attacks[i]['name'])
-            self.hit(opponent, i, verbose)
+            #This was the hit method. put here for now.
+            self.attacks[i]['attack'].advantage = self.check_advantage(opponent)
+            if self.attacks[i]['attack'].roll(verbose) >= opponent.ac:
+                self.attacks[i]['damage'].crit = self.attacks[i]['attack'].crit  #Pass the crit if present.
+                h = self.attacks[i]['damage'].roll(verbose)
+                opponent.take_damage(h, verbose)
+                self.tally['damage'] += h
+                self.tally['hits'] += 1
+            else:
+                self.tally['misses'] += 1
 
+    #TODO
+    def check_action(self,action, verbose):
+        return getattr(self, action)(assess=1)
 
-    #TODO Finish…
-    #action.
-    #weight set
-    #act.
-
-    def check_action(self,arena, verbose):
-        #do something
-        return 0
-
-    def do_action(self,arena,verbose):
+    #TODO
+    def do_action(self,action, verbose):
         #do it.
         pass
 
-    def TBA_act(self,arena,verbose=0):
-        if not arena.find('alive enemy'):
+    #TODO
+    def TBA_act(self,verbose=0):
+        if not self.arena.find('alive enemy'):
             raise Encounter.Victory()
-        #self.actions={}?
-        self.check_action()
+        x={'nothing':'cast_nothing'}
+        choice=[self.check_action(x) for x in self.actions]
+        best=sorted(choice.keys(),key=choice.get)[0]
+        self.do_action(best)
 
-    def act(self,arena,verbose=0):
-        if not arena.find('alive enemy'):
+    def act(self,verbose=0):
+        if not self.arena.find('alive enemy'):
             raise Encounter.Victory()
         # BONUS ACTION
         # heal  -healing word, a bonus action.
         if self.healing_spells > 0:
-            weakling = self.assess_wounded(arena,verbose)
+            weakling = self.assess_wounded(verbose)
             if weakling != 0:
                 self.cast_healing(weakling, verbose)
         #Main action!
-        economy = len(arena.find('allies')) > len(arena.find('opponents')) > 0
+        economy = len(self.arena.find('allies')) > len(self.arena.find('opponents')) > 0
         #Buff?
         if self.condition == 'netted':
             #NOT-RAW: DC10 strength check or something equally easy for monsters
@@ -302,17 +338,17 @@ class Creature:
             self.conc_fx()
             if verbose: print(self.name + ' buffs up!')
             #greater action economy: waste opponent's turn.
-        elif economy and self is arena.find('weakest allies')[0]:
+        elif economy and self is self.arena.find('weakest allies')[0]:
             if verbose: print(self.name + " is dodging")
             self.dodge = 1
         elif economy and self.alt_attack['name'] == 'net':
-            opponent = arena.find('fiersomest enemy alive', self, verbose)[0]
+            opponent = self.arena.find('fiersomest enemy alive', self, verbose)[0]
             if opponent.condition !='netted':
                 self.net(opponent, verbose)
             else:
-                self.multiattack(arena,verbose)
+                self.multiattack(verbose)
         else:
-            self.multiattack(arena,verbose)
+            self.multiattack(verbose)
 
 
 
@@ -325,21 +361,24 @@ class Encounter():
         # self.lineup={x.name:x for x in lineup}
         #self.lineup = list(lineup)  #Classic fuck-up
         self.combattants = list(lineup)
-        self.tally_rounds = 0
-        self.tally_battles = 0
+        for chap in lineup:
+            chap.arena=self
+        self.tally={'rounds':0, 'battles': 0, 'perfect': None, 'close':None, 'victories':None}
         self.active=lineup[0]
         self.name = 'Encounter'
         self.check()
         self.note=''
 
     def check(self):
+        #TODO Should keep originals if present
         self.sides = set([dude.alignment for dude in self])
-        self.tally_perfect = {side: 0 for side in self.sides}
-        self.tally_close = {side: 0 for side in self.sides}
-        self.tally_victories = {side: 0 for side in self.sides}
+        self.tally['perfect'] = {side: 0 for side in self.sides}
+        self.tally['close'] = {side: 0 for side in self.sides}
+        self.tally['victories'] = {side: 0 for side in self.sides}
 
     def append(self, newbie):
         self.combattants.append(newbie)
+        newbie.arena=self
         self.check()
 
     def extend(self, iterable):
@@ -348,9 +387,9 @@ class Encounter():
 
     def __str__(self):
         string = "=" * 50 + ' ' + self.name + " " + "=" * 50 + "\n"
-        string += "Battles: " + str(self.tally_battles) + "; Sum of rounds: " + str(self.tally_rounds) + "; " + self.note + "\n"
+        string += "Battles: " + str(self.tally['battles']) + "; Sum of rounds: " + str(self.tally['rounds']) + "; " + self.note + "\n"
         for s in self.sides:
-            string += "> Team " + str(s) + " = winning battles: " + str(self.tally_victories[s]) + "; perfect battles: " + str(self.tally_perfect[s]) + "; close-call battles: " + str(self.tally_close[s])+ ";\n"
+            string += "> Team " + str(s) + " = winning battles: " + str(self.tally['victories'][s]) + "; perfect battles: " + str(self.tally['perfect'][s]) + "; close-call battles: " + str(self.tally['close'][s])+ ";\n"
         string += "-" * 49 + " Combattants  " + "-" * 48 + "\n"
         for fighter in self.combattants: string += str(fighter) + "\n"
         return string
@@ -359,7 +398,7 @@ class Encounter():
         return len(self.combattants)
 
     def __add__(self, other):
-        return Encounter(self.combattants,other.combattants)
+        self.extend(other)
 
     def __iter__(self):
         return iter(self.combattants)
@@ -411,26 +450,26 @@ class Encounter():
     '''
 
     def battle(self,reset=1,verbose=1):
-        self.tally_battles += 1
+        self.tally['battles'] += 1
         if reset: self.reset()
-        for schmuck in self: schmuck.tally_battles += 1
+        for schmuck in self: schmuck.tally['battles'] += 1
         self.roll_for_initiative(verbose)
         while True:
             try:
                 if verbose: print('**NEW ROUND**')
-                self.tally_rounds += 1
+                self.tally['rounds'] += 1
                 for character in self:
                     character.ready()
                     if character.isalive():
                         self.active=character
-                        character.tally_rounds += 1
-                        character.act(self, verbose)
+                        character.tally['rounds'] += 1
+                        character.act(verbose)
             except Encounter.Victory:
                 break
         #closing up maths
         side=self.active.alignment
         team=self.find('allies')
-        self.tally_victories[side] += 1
+        self.tally['victories'][side] += 1
         perfect=1
         close=0
         for x in team:
@@ -439,11 +478,11 @@ class Encounter():
             if x.hp < 0:
                 close =1
         if not perfect:
-            self.tally_perfect[side] += perfect
-        self.tally_close[side] += close
+            self.tally['perfect'][side] += perfect
+        self.tally['close'][side] += close
         for character in self:
-            character.tally_hp +=character.hp
-            character.tally_healing_spells +=character.healing_spells
+            character.tally['hp'] +=character.hp
+            character.tally['healing_spells'] +=character.healing_spells
         if verbose: print(self)
         #return self or side?
         return self
@@ -451,7 +490,7 @@ class Encounter():
     def go_to_war(self, rounds=1000):
         for i in range(rounds):
             self.battle(1,0)
-        x={y:self.tally_victories[y] for y in self.sides}
+        x={y:self.tally['victories'][y] for y in self.sides}
         se={}
         for i in list(x):
             x[i] /= rounds
@@ -465,7 +504,7 @@ class Encounter():
         return self
 
 
-    def find(self, what, searcher=None, verbose=0, team=None):
+    def find(self, what, searcher=None, team=None):
 
         def _enemies(folk):
             return [query for query in folk if (query.alignment != team)]
@@ -497,7 +536,7 @@ class Encounter():
         searcher = searcher or self.active
         team = team or searcher.alignment
         folk=self.combattants
-        todo=list(what.split(' '))
+        agenda=list(what.split(' '))
         opt={
             'enemies':_enemies,
             'enemy':_enemies,
@@ -511,27 +550,27 @@ class Encounter():
             'random':_random,
             'bloodiest':_bloodiest
         }
-        for cmd in list(todo):
+        for cmd in list(agenda):
             if folk==None:
                 folk=[]
             for o in opt:
                 if (cmd == o):
                     folk= opt[o](folk)
-                    todo.remove(cmd)
-        if todo:
+                    agenda.remove(cmd)
+        if agenda:
             raise Exception(str(cmd) + ' field not found')
         return folk
 
 ########### MAIN #####
 
 
+
 netsharpshooter = Creature("net-build bard", "good",
                 hp=18, ac=18,
                 initiative_bonus=2,
                 healing_spells=6, healing_bonus=3, healing_dice=4,
-                attack_parameters=[['rapier', 4, 2, 8]], alt_attack=['net', 4, 0, 0])
-
-bard = Creature("Bard", "good",
+                attack_parameters=[['rapier', 4, 2, 8]], alt_attack=['net', 4, 0, 0], level=3)
+Creature("Bard", "good",
                       hp=18, ac=18,
                       healing_spells=6, healing_bonus=3, healing_dice=4,
                       initiative_bonus=2,
@@ -651,8 +690,8 @@ inert = Creature("Test", "bad",
 
 rounds = 1000
 
-Encounter(barbarian, giant_rat.copy(), bard,polar).battle(verbose=1)
-
+print(Encounter(hero.copy(),hero.copy(),hero.copy(),hero.copy(),polar.copy(),polar.copy()).go_to_war(rounds))
+print(Encounter(netsharpshooter,druid,barbarian,mega_tank,polar.copy(),polar.copy()).go_to_war(rounds))
 
 ### KILL PEACEFULLY
 import sys
@@ -662,129 +701,3 @@ sys.exit(0)
 
 ###DUMPYARD ###########
 #CODE HERE MAY BE BROKEN
-
-
-
-#print(Encounter(hero.copy(),hero.copy(),hero.copy(),hero.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
-#print(Encounter(doppelbard.copy(),doppelbard.copy(),generic_tank.copy(),generic_tank.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
-#print(Encounter(bard,barbarian,generic_tank,druid,polar.copy(),polar.copy(),polar.copy()).go_to_stat_war(1000))
-
-#joe.attack_parse([['d12', 2, 4, 12]])
-#antijoe.attack_parse([['2d6', 2, 4, 6, 6]])
-#print(Encounter(joe,antijoe).go_to_stat_war(rounds))
-
-# Skeezy vs. Gringo
-if False:
-    duel = Encounter(druid, barbarian)
-    barbarian.alignment = "duelist"
-    print(duel.go_to_war(100))
-    print(duel)
-
-#CRx?
-if False:
-    arena = Encounter(druid, bard, generic_tank, barbarian, doppelbard,
-                      a_b_dragon)
-    #arena.battle(verbose=1)
-    print(arena.go_to_war())
-    print(arena)
-
-if False:
-    MUNCHKIN = 0  #Killing the weakest on PVP seems a bad strategy
-    print(Encounter(druid, bard, generic_tank, barbarian, doppelbard).set_deathmatch().go_to_war())
-
-
-#commoner vs. rat
-if False:
-    rounds=1000
-    report = np.zeros((10, 10,10))
-    arena = Encounter(commoner, giant_rat)
-    for z in range(1,11):
-        for y in range(1, 11):
-            for x in range(1, 11):
-                #Variants
-                commoner.starting_hp = 4 * x
-                commoner.ac = 10 + y
-                commoner.attacks[0]['damage'].dice=[z*2]
-                r = arena.go_to_war(rounds)
-                report[x-1,y-1,z-1]=r['good']
-    print(report)
-    scipy.io.savemat('simulation.mat',mdict={'battle': report})
-
-
-if False:
-    rounds=1000
-    mobster = commoner.copy()
-    mobster.alignment='evil'
-    arena = Encounter(hill_giant)
-    arena2= Encounter(giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy(),giant_rat.copy())
-    arena3=Encounter(mobster) #I am unsure I can initialise an empty encounter…
-    for x in range(16):
-        arena3.append(mobster.copy())
-    for z in range(1,26):
-        arena.append(commoner.copy())
-        arena2.append(commoner.copy())
-        arena3.append(commoner.copy())
-        print(str(z)+"\t"+str(arena2.go_to_war(rounds)['good'])+"\t"+str(arena.go_to_war(rounds)['good'])+"\t"+str(arena3.go_to_war(rounds)['good']))
-
-if False:
-    import numpy as np  #needed solely in the after analysis, not the simulations.
-    import scipy.io     #ditto
-    rounds=1000
-    n=6
-    mobster = commoner.copy()
-    mobster.alignment='evil'
-    mobster.name='mobster'
-    r=np.zeros((n,n))
-    for x in range(n):
-        arena=Encounter()
-        for y in range(x+1):
-            arena.append(commoner.copy())
-        for y in range(n):
-            arena.append(mobster.copy())
-            r[x,y]=arena.go_to_war(rounds)['good']
-            print(r[x,y])
-    scipy.io.savemat('simulation2.mat',mdict={'battle': r})
-
-if False:
-    rounds=1000
-    n=20
-    arena=Encounter(joe,antijoe)
-    for x in range(n):
-        joe.attack_parse([['shortsword', 2+x, 2, 6]])
-        arena.append(bob)
-        y=arena.go_to_stat_war(rounds)
-        print(str(y['good']*100)+" ± "+str(y['good_se']*100))
-
-#proof that there is an equal victory change for all damage combinations with the same value of avg_damage=n_dice(dice_max/2+0.5)+bonus
-if False:
-    rounds=1000
-    arena = Encounter(joe, antijoe)
-    d=[{},{},{},{}]
-    for x in range(2,13,1):
-        joe.attacks[0]['damage'].dice[0]=x
-        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']*100)
-        d[0][str(x/2+2.5)]=r
-    for x in range(2,13,1):
-        joe.attacks[0]['damage'].dice=[x,x]
-        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']*100)
-        d[1][str(x+3)+".0"]=r
-    for x in range(2,13,1):
-        joe.attacks[0]['damage'].bonus=3
-        joe.attacks[0]['damage'].dice=[x]
-        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']*100)
-        d[2][str(x/2+3.5)]=r
-    for x in range(2,13,1):
-        joe.attacks[0]['damage'].bonus=4
-        joe.attacks[0]['damage'].dice=[x]
-        joe.attacks[0]['name']=str(joe.attacks[0]['damage'])
-        r=round(arena.go_to_war(rounds)['good']*100)
-        d[3][str(x/2+4.5)]=r
-    for x in sorted(list(set(list(d[0].keys())+list(d[1].keys())+list(d[2].keys())+list(d[3].keys())))):
-        s=str(x)+"\t"
-        for y in range(0,4):
-            if x in d[y].keys(): s+= str(d[y][x])
-            s+= "\t"
-        print(s)
