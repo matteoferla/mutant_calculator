@@ -97,6 +97,8 @@ class Dice:
         if self.dice[0] == 20:
             return self.icosaroll(verbose)
         else:
+            if crit:
+                self.crit=crit
             return self.multiroll(verbose)
 
 
@@ -167,9 +169,6 @@ class Creature:
         self.starting_hp=self.hp
         self.proficiency=1+round((level)/4)
         #self.attack_parse(attack_parameters)
-
-
-
 
     def copy(self):
         self.copy_index += 1
@@ -387,6 +386,8 @@ class Encounter():
 
     def __str__(self):
         string = "=" * 50 + ' ' + self.name + " " + "=" * 50 + "\n"
+        string += self.predict()
+        string += "-"*110+"\n"
         string += "Battles: " + str(self.tally['battles']) + "; Sum of rounds: " + str(self.tally['rounds']) + "; " + self.note + "\n"
         for s in self.sides:
             string += "> Team " + str(s) + " = winning battles: " + str(self.tally['victories'][s]) + "; perfect battles: " + str(self.tally['perfect'][s]) + "; close-call battles: " + str(self.tally['close'][s])+ ";\n"
@@ -448,6 +449,33 @@ class Encounter():
         netting is a better option albeit a build.
     called shot —not an official rule. Turn economy.
     '''
+    def predict(self):
+        def not_us(side):
+            (a,b)=list(self.sides)
+            if a == side:
+                return b
+            else:
+                return a
+        if len(self.sides) !=2:
+            #print('Calculations unavailable for more than 2 teams')
+            return ""
+        t_ac={x:[] for x in self.sides}
+        for character in self:
+            t_ac[character.alignment].append(character.ac)
+        ac={x: sum(t_ac[x])/len(t_ac[x]) for x in t_ac.keys()}
+        damage={x:0 for x in self.sides}
+        hp={x:0 for x in self.sides}
+        for character in self:
+            for move in character.attacks:
+                move['damage'].avg=True
+                damage[character.alignment]+= (20+move['attack'].bonus-ac[not_us(character.alignment)])/20*move['damage'].roll()
+                move['damage'].avg=False
+                hp[character.alignment]+= character.starting_hp
+        (a,b)=list(self.sides)
+        rate={a: hp[a]/damage[b], b: hp[b]/damage[a]}
+        return ('Rough a priori predictions: «WARNING: EXPERIMENTAL SECTION»'+"\n"+
+                '> '+ a + '= expected rounds to survive: ' + str(round(rate[a],2))+'; badly normalised: ' + str(round(rate[a]/(rate[a]+rate[b])*100))+ '%'+"\n"+
+                '> '+ b + '= expected rounds to survive: ' + str(round(rate[b],2))+'; badly normalised: ' + str(round(rate[b]/(rate[a]+rate[b])*100))+ '%'+"\n")
 
     def battle(self,reset=1,verbose=1):
         self.tally['battles'] += 1
@@ -688,10 +716,10 @@ inert = Creature("Test", "bad",
 ##################################################################
 ################### HERE IS WHERE YOU CAN DECIDE THE LINE UP #####
 
-rounds = 1000
+rounds = 100
 
-print(Encounter(hero.copy(),hero.copy(),hero.copy(),hero.copy(),polar.copy(),polar.copy()).go_to_war(rounds))
-print(Encounter(netsharpshooter,druid,barbarian,mega_tank,polar.copy(),polar.copy()).go_to_war(rounds))
+wwe=Encounter(netsharpshooter,druid,barbarian,mega_tank,polar.copy(),polar.copy(),polar.copy())
+print(wwe.go_to_war(rounds))
 
 ### KILL PEACEFULLY
 import sys
