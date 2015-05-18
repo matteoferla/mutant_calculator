@@ -1,2 +1,0 @@
-# tangents
-See wiki…
