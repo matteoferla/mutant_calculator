@@ -8,7 +8,7 @@ Mutanalysis is composed of three HTML pages:
 
 * `Mutational_bias_calculator`
 * `Mutation_counter`
-*	vVariance_notes`
+*	`Variance_notes`
 
 Each page uses a cetral CSS file, `mut.css`, and two external style resources, Font-Awesome and the Source Sans Pro (Google fonts), two commonly used resources used in contemporary webpages.
 
