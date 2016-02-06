@@ -1,5 +1,5 @@
 # mutant_calculator
-This app is available on [www.mutanalyst.com](www.mutanalyst.com).
+This app is available on [www.mutanalyst.com](http://www.mutanalyst.com).
 A full copy of the website, including third party tools, can be found in my [dropbox](https://www.dropbox.com/sh/42b3ho1pqic67ej/AAAqmOBIC-Nzi4-7Xy5oDZKEa?dl=0), please note that the author (me) is not affiated with JQuery and other third party tools.
 
 # Overview
