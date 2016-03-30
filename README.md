@@ -1,6 +1,6 @@
 # mutant_calculator
 This app is available on [www.mutanalyst.com](http://www.mutanalyst.com).   
-A full copy of the website, including third party tools (credits go to respective authors, _vide_ _infra_), can be found in my [dropbox](https://www.dropbox.com/sh/42b3ho1pqic67ej/AAAqmOBIC-Nzi4-7Xy5oDZKEa?dl=0), please note that the author (me) is not affiated with JQuery and other third party tools.
+A full copy of the website, including third party tools (credits go to respective authors, _vide_ _infra_), can be found in my [dropbox](https://www.dropbox.com/sh/42b3ho1pqic67ej/AAAqmOBIC-Nzi4-7Xy5oDZKEa?dl=0), please note that the author (me) is not affiated with the third party tools.
 
 # Overview
 This section details how the program works and its knowledge is not needed to use the program. It is intended as an overview in case a researcher wanted to alter it for a different purpose or copy a function from it.   
