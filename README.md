@@ -3,7 +3,9 @@ This app is available on [www.mutanalyst.com](http://www.mutanalyst.com).
 A full copy of the website, including third party tools (credits go to respective authors, _vide_ _infra_), can be found in my [dropbox](https://www.dropbox.com/sh/42b3ho1pqic67ej/AAAqmOBIC-Nzi4-7Xy5oDZKEa?dl=0), please note that the author (me) is not affiated with the third party tools.
 If used please cite:   
 > Ferla MP. Mutanalyst, an online tool for assessing the mutational spectrum of epPCR libraries with poor sampling.    
+
 > BMC Bioinformatics. 2016 Apr 4;17:152.   
+
 > * doi: [10.1186/s12859-016-0996-7](http://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-016-0996-7)
 > * PubMed PMID: [27044645](https://www.ncbi.nlm.nih.gov/pubmed/27044645)
 > * PubMed Central PMCID: [PMC4820924](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4820924/)
